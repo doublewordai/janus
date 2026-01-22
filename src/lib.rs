@@ -800,11 +800,11 @@ mod tests {
             .await
             .expect("Write pool should allow INSERT");
 
-        // Read back from read pool
+        // Read back from write pool (TEMP tables are session-specific)
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM test_users")
-            .fetch_one(pools.read())
+            .fetch_one(pools.write())
             .await
-            .expect("Read pool should allow SELECT");
+            .expect("Write pool should allow SELECT");
 
         assert_eq!(count.0, 1, "Should have 1 user");
     }
