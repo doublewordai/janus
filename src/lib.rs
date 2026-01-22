@@ -176,6 +176,7 @@ use std::ops::Deref;
 /// use sqlx::PgPool;
 /// use janus::PoolProvider;
 ///
+/// #[derive(Clone)]
 /// struct MyPools {
 ///     primary: PgPool,
 ///     replica: Option<PgPool>,
@@ -267,7 +268,7 @@ impl DbPools {
     ///
     /// ```rust,no_run
     /// use sqlx::PgPool;
-    /// use sqlx_pool_router::DbPools;
+    /// use janus::DbPools;
     ///
     /// # async fn example() -> Result<(), sqlx::Error> {
     /// let pool = PgPool::connect("postgresql://localhost/db").await?;
@@ -291,7 +292,7 @@ impl DbPools {
     ///
     /// ```rust,no_run
     /// use sqlx::postgres::PgPoolOptions;
-    /// use sqlx_pool_router::DbPools;
+    /// use janus::DbPools;
     ///
     /// # async fn example() -> Result<(), sqlx::Error> {
     /// let primary = PgPoolOptions::new()
@@ -323,7 +324,7 @@ impl DbPools {
     ///
     /// ```rust,no_run
     /// use sqlx::PgPool;
-    /// use sqlx_pool_router::DbPools;
+    /// use janus::DbPools;
     ///
     /// # async fn example() -> Result<(), sqlx::Error> {
     /// let pool = PgPool::connect("postgresql://localhost/db").await?;
@@ -344,7 +345,7 @@ impl DbPools {
     ///
     /// ```rust,no_run
     /// use sqlx::PgPool;
-    /// use sqlx_pool_router::DbPools;
+    /// use janus::DbPools;
     ///
     /// # async fn example() -> Result<(), sqlx::Error> {
     /// let pool = PgPool::connect("postgresql://localhost/db").await?;
@@ -433,7 +434,7 @@ impl PoolProvider for PgPool {
 ///
 /// ```rust,no_run
 /// use sqlx::PgPool;
-/// use sqlx_pool_router::{TestDbPools, PoolProvider};
+/// use janus::{TestDbPools, PoolProvider};
 ///
 /// #[sqlx::test]
 /// async fn test_read_write_routing(pool: PgPool) {
@@ -469,7 +470,7 @@ impl PoolProvider for PgPool {
 ///
 /// ```rust,no_run
 /// use sqlx::PgPool;
-/// use sqlx_pool_router::{TestDbPools, PoolProvider};
+/// use janus::{TestDbPools, PoolProvider};
 ///
 /// struct Repository<P: PoolProvider> {
 ///     pools: P,
@@ -527,7 +528,7 @@ impl TestDbPools {
     ///
     /// ```rust,no_run
     /// use sqlx::PgPool;
-    /// use sqlx_pool_router::TestDbPools;
+    /// use janus::TestDbPools;
     ///
     /// # async fn example(pool: PgPool) -> Result<(), sqlx::Error> {
     /// let pools = TestDbPools::new(pool).await?;

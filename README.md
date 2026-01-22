@@ -203,6 +203,31 @@ This project is licensed under either of:
 
 at your option.
 
+## Running Tests
+
+The test suite requires a PostgreSQL database:
+
+```bash
+# Start PostgreSQL (using Docker)
+docker run -d \
+  -p 5432:5432 \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=test \
+  --name janus-test-db \
+  postgres:16
+
+# Set the DATABASE_URL (use 'postgres' database for sqlx::test to create isolated test DBs)
+export DATABASE_URL=postgresql://postgres:password@localhost:5432/postgres
+
+# Run tests
+cargo test --all-features
+
+# Clean up
+docker stop janus-test-db && docker rm janus-test-db
+```
+
+**Note:** The tests use `#[sqlx::test]` which automatically creates isolated test databases for each test, so you don't need to worry about test pollution.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
