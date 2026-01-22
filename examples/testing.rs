@@ -8,7 +8,7 @@
 //! 2. Run: cargo run --example testing
 
 use sqlx::postgres::PgPoolOptions;
-use sqlx_pool_router::{PoolProvider, TestDbPools};
+use janus::{PoolProvider, TestDbPools};
 
 /// A repository that should route reads to .read() and writes to .write()
 struct UserRepository<P: PoolProvider> {

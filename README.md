@@ -206,3 +206,17 @@ at your option.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+### Commit Convention
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/). Please format your commits as:
+
+- `feat:` New features
+- `fix:` Bug fixes
+- `docs:` Documentation changes
+- `test:` Test additions or modifications
+- `refactor:` Code refactoring
+- `perf:` Performance improvements
+- `chore:` Build process or tooling changes
+
+Example: `feat: add support for connection timeout configuration`
