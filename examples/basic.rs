@@ -11,8 +11,8 @@
 //! 3. Optionally set REPLICA_DATABASE_URL (or it will use the same as primary)
 //! 4. Run: cargo run --example basic
 
-use sqlx::postgres::PgPoolOptions;
 use janus::{DbPools, PoolProvider};
+use sqlx::postgres::PgPoolOptions;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,8 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "postgresql://postgres:password@localhost/test".to_string());
 
     // Use the same URL for replica in development, or a different one in production
-    let replica_url =
-        std::env::var("REPLICA_DATABASE_URL").unwrap_or_else(|_| primary_url.clone());
+    let replica_url = std::env::var("REPLICA_DATABASE_URL").unwrap_or_else(|_| primary_url.clone());
 
     println!("🔌 Connecting to databases:");
     println!("   Primary: {}", primary_url);

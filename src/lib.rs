@@ -693,7 +693,10 @@ mod tests {
             .fetch_one(db_pools.read())
             .await
             .unwrap();
-        assert_eq!(read_marker.0, replica_name, "read() should route to replica");
+        assert_eq!(
+            read_marker.0, replica_name,
+            "read() should route to replica"
+        );
 
         // write() should return primary
         let write_marker: (String,) = sqlx::query_as("SELECT name FROM db_marker")

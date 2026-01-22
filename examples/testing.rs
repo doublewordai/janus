@@ -7,8 +7,8 @@
 //! 1. Set DATABASE_URL environment variable
 //! 2. Run: cargo run --example testing
 
-use sqlx::postgres::PgPoolOptions;
 use janus::{PoolProvider, TestDbPools};
+use sqlx::postgres::PgPoolOptions;
 
 /// A repository that should route reads to .read() and writes to .write()
 struct UserRepository<P: PoolProvider> {
@@ -75,7 +75,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✓ Table created");
     println!();
 
-    let repo = UserRepository { pools: pools.clone() };
+    let repo = UserRepository {
+        pools: pools.clone(),
+    };
 
     // Test 1: Writing through .write() works
     println!("Test 1: Writing through .write() pool");
