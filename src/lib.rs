@@ -201,13 +201,13 @@ pub trait PoolProvider: Clone + Send + Sync + 'static {
     /// The pool type this provider returns.
     ///
     /// This allows PoolProvider to work with both standard `PgPool` and traced pools like
-    /// `sqlx_tracing::Pool<Postgres>`.
+    /// `sqlx_tracing::Pool<sqlx::Postgres>`.
     ///
     /// # Requirements
     ///
     /// When using the pool with sqlx queries, you'll need to ensure that
-    /// `for<'c> &'c Self::Pool: Executor<'c, Database = Postgres>` is satisfied.
-    /// This is automatically true for `PgPool` and `sqlx_tracing::Pool<Postgres>`.
+    /// `for<'c> &'c Self::Pool: Executor<'c, Database = sqlx::Postgres>` is satisfied.
+    /// This is automatically true for `PgPool` and `sqlx_tracing::Pool<sqlx::Postgres>`.
     ///
     /// If you encounter compiler errors about `Executor` not being implemented,
     /// add a where clause to your impl block:
