@@ -15,7 +15,10 @@ struct UserRepository<P: PoolProvider> {
     pools: P,
 }
 
-impl<P: PoolProvider> UserRepository<P> {
+impl<P: PoolProvider> UserRepository<P>
+where
+    for<'c> &'c P::Pool: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
     async fn create_user(&self, name: &str) -> Result<i64, sqlx::Error> {
         // This MUST use .write() - TestDbPools will catch if we use .read()
         sqlx::query_scalar("INSERT INTO users (name) VALUES ($1) RETURNING id")
