@@ -1,6 +1,6 @@
 [package]
 name = "sqlx-pool-router"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["fergus.finn@doubleword.ai"]
 description = "Lightweight SQLx PostgreSQL connection pool routing for primary/replica separation"
@@ -12,11 +12,16 @@ readme = "README.md"
 
 [dependencies]
 sqlx = { version = "0.8", default-features = false, features = ["postgres"] }
+sqlx-tracing = { version = "0.1", optional = true, features = ["postgres"] }
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
 url = "2.5"
 sqlx = { version = "0.8", features = ["postgres", "macros", "runtime-tokio"] }
+
+[features]
+default = []
+sqlx-tracing = ["dep:sqlx-tracing"]
 
 [package.metadata.docs.rs]
 all-features = true

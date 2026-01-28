@@ -92,7 +92,10 @@
 //!     pools: P,
 //! }
 //!
-//! impl<P: PoolProvider> Repository<P> {
+//! impl<P: PoolProvider> Repository<P>
+//! where
+//!     for<'c> &'c P::Pool: sqlx::Executor<'c, Database = sqlx::Postgres>,
+//! {
 //!     async fn get_user(&self, id: i64) -> Result<String, sqlx::Error> {
 //!         // Read from replica
 //!         sqlx::query_scalar("SELECT name FROM users WHERE id = $1")
@@ -135,6 +138,9 @@
 
 use sqlx::PgPool;
 use std::ops::Deref;
+
+#[cfg(feature = "sqlx-tracing")]
+use std::sync::Arc;
 
 /// Trait for providing database pools with read/write routing.
 ///
@@ -180,27 +186,53 @@ use std::ops::Deref;
 /// }
 ///
 /// impl PoolProvider for MyPools {
-///     fn read(&self) -> &PgPool {
+///     type Pool = PgPool;
+///
+///     fn read(&self) -> &Self::Pool {
 ///         self.replica.as_ref().unwrap_or(&self.primary)
 ///     }
 ///
-///     fn write(&self) -> &PgPool {
+///     fn write(&self) -> &Self::Pool {
 ///         &self.primary
 ///     }
 /// }
 /// ```
 pub trait PoolProvider: Clone + Send + Sync + 'static {
+    /// The pool type this provider returns.
+    ///
+    /// This allows PoolProvider to work with both standard `PgPool` and traced pools like
+    /// `sqlx_tracing::Pool<sqlx::Postgres>`.
+    ///
+    /// # Requirements
+    ///
+    /// When using the pool with sqlx queries, you'll need to ensure that
+    /// `for<'c> &'c Self::Pool: Executor<'c, Database = sqlx::Postgres>` is satisfied.
+    /// This is automatically true for `PgPool` and `sqlx_tracing::Pool<sqlx::Postgres>`.
+    ///
+    /// If you encounter compiler errors about `Executor` not being implemented,
+    /// add a where clause to your impl block:
+    ///
+    /// ```rust,ignore
+    /// impl<P: PoolProvider> MyStruct<P>
+    /// where
+    ///     for<'c> &'c P::Pool: sqlx::Executor<'c, Database = sqlx::Postgres>,
+    /// {
+    ///     // Your methods that use sqlx queries
+    /// }
+    /// ```
+    type Pool: Send + Sync;
+
     /// Get a pool for read operations.
     ///
     /// May return a read replica for load distribution, or fall back to
     /// the primary pool if no replica is configured.
-    fn read(&self) -> &PgPool;
+    fn read(&self) -> &Self::Pool;
 
     /// Get a pool for write operations.
     ///
     /// Should always return the primary pool to ensure ACID guarantees
     /// and read-after-write consistency.
-    fn write(&self) -> &PgPool;
+    fn write(&self) -> &Self::Pool;
 }
 
 /// Database pool abstraction supporting read replicas.
@@ -360,11 +392,13 @@ impl DbPools {
 }
 
 impl PoolProvider for DbPools {
-    fn read(&self) -> &PgPool {
+    type Pool = PgPool;
+
+    fn read(&self) -> &Self::Pool {
         self.replica.as_ref().unwrap_or(&self.primary)
     }
 
-    fn write(&self) -> &PgPool {
+    fn write(&self) -> &Self::Pool {
         &self.primary
     }
 }
@@ -392,7 +426,10 @@ impl Deref for DbPools {
 /// use sqlx::PgPool;
 /// use sqlx_pool_router::PoolProvider;
 ///
-/// async fn query_user<P: PoolProvider>(pools: &P, id: i64) -> Result<String, sqlx::Error> {
+/// async fn query_user<P: PoolProvider>(pools: &P, id: i64) -> Result<String, sqlx::Error>
+/// where
+///     for<'c> &'c P::Pool: sqlx::Executor<'c, Database = sqlx::Postgres>,
+/// {
 ///     sqlx::query_scalar("SELECT name FROM users WHERE id = $1")
 ///         .bind(id)
 ///         .fetch_one(pools.read())
@@ -408,11 +445,13 @@ impl Deref for DbPools {
 /// # }
 /// ```
 impl PoolProvider for PgPool {
-    fn read(&self) -> &PgPool {
+    type Pool = PgPool;
+
+    fn read(&self) -> &Self::Pool {
         self
     }
 
-    fn write(&self) -> &PgPool {
+    fn write(&self) -> &Self::Pool {
         self
     }
 }
@@ -473,7 +512,10 @@ impl PoolProvider for PgPool {
 ///     pools: P,
 /// }
 ///
-/// impl<P: PoolProvider> Repository<P> {
+/// impl<P: PoolProvider> Repository<P>
+/// where
+///     for<'c> &'c P::Pool: sqlx::Executor<'c, Database = sqlx::Postgres>,
+/// {
 ///     async fn get_user(&self, id: i64) -> Result<String, sqlx::Error> {
 ///         sqlx::query_scalar("SELECT name FROM users WHERE id = $1")
 ///             .bind(id)
@@ -559,12 +601,216 @@ impl TestDbPools {
 }
 
 impl PoolProvider for TestDbPools {
-    fn read(&self) -> &PgPool {
+    type Pool = PgPool;
+
+    fn read(&self) -> &Self::Pool {
         &self.replica
     }
 
-    fn write(&self) -> &PgPool {
+    fn write(&self) -> &Self::Pool {
         &self.primary
+    }
+}
+
+/// Database pool abstraction with OpenTelemetry-compatible tracing.
+///
+/// This type wraps [`sqlx_tracing::Pool`] to provide automatic instrumentation
+/// of all database operations with tracing spans. It provides the same read/write
+/// routing capabilities as [`DbPools`] but with built-in observability.
+///
+/// # Requirements
+///
+/// This type is only available when the `sqlx-tracing` feature is enabled.
+///
+/// ```toml
+/// [dependencies]
+/// sqlx-pool-router = { version = "0.3", features = ["sqlx-tracing"] }
+/// ```
+///
+/// # Examples
+///
+/// ## Single Pool Configuration
+///
+/// ```rust,no_run
+/// # #[cfg(feature = "sqlx-tracing")]
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// use sqlx::PgPool;
+/// use sqlx_pool_router::TracedDbPools;
+///
+/// let pool = PgPool::connect("postgresql://localhost/db").await?;
+/// let traced_pool = sqlx_tracing::Pool::from(pool);
+/// let pools = TracedDbPools::new(traced_pool);
+///
+/// // All operations are automatically traced
+/// assert!(!pools.has_replica());
+/// # Ok(())
+/// # }
+/// ```
+///
+/// ## Primary/Replica Configuration
+///
+/// ```rust,no_run
+/// # #[cfg(feature = "sqlx-tracing")]
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// use sqlx::postgres::PgPoolOptions;
+/// use sqlx_pool_router::TracedDbPools;
+///
+/// let primary = PgPoolOptions::new()
+///     .max_connections(5)
+///     .connect("postgresql://primary/db")
+///     .await?;
+/// let primary_traced = sqlx_tracing::Pool::from(primary);
+///
+/// let replica = PgPoolOptions::new()
+///     .max_connections(10)
+///     .connect("postgresql://replica/db")
+///     .await?;
+/// let replica_traced = sqlx_tracing::Pool::from(replica);
+///
+/// let pools = TracedDbPools::with_replica(primary_traced, replica_traced);
+/// assert!(pools.has_replica());
+/// # Ok(())
+/// # }
+/// ```
+///
+/// ## Using with Generic Code
+///
+/// ```rust,no_run
+/// # #[cfg(feature = "sqlx-tracing")]
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// use sqlx_pool_router::PoolProvider;
+///
+/// struct Repository<P: PoolProvider> {
+///     pools: P,
+/// }
+///
+/// impl<P: PoolProvider> Repository<P>
+/// where
+///     for<'c> &'c P::Pool: sqlx::Executor<'c, Database = sqlx::Postgres>,
+/// {
+///     async fn get_user(&self, id: i64) -> Result<String, sqlx::Error> {
+///         sqlx::query_scalar("SELECT name FROM users WHERE id = $1")
+///             .bind(id)
+///             .fetch_one(self.pools.read())
+///             .await
+///     }
+/// }
+///
+/// // Works with TracedDbPools - all queries automatically traced!
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "sqlx-tracing")]
+#[derive(Clone, Debug)]
+pub struct TracedDbPools {
+    primary: Arc<sqlx_tracing::Pool<sqlx::Postgres>>,
+    replica: Option<Arc<sqlx_tracing::Pool<sqlx::Postgres>>>,
+}
+
+#[cfg(feature = "sqlx-tracing")]
+impl TracedDbPools {
+    /// Create a new TracedDbPools with only a primary pool.
+    ///
+    /// This is useful for development or when you don't have a read replica configured.
+    /// All read and write operations will route to the primary pool.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # #[cfg(feature = "sqlx-tracing")]
+    /// # async fn example() -> Result<(), sqlx::Error> {
+    /// use sqlx::PgPool;
+    /// use sqlx_pool_router::TracedDbPools;
+    ///
+    /// let pool = PgPool::connect("postgresql://localhost/db").await?;
+    /// let traced_pool = sqlx_tracing::Pool::from(pool);
+    /// let pools = TracedDbPools::new(traced_pool);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new(primary: sqlx_tracing::Pool<sqlx::Postgres>) -> Self {
+        Self {
+            primary: Arc::new(primary),
+            replica: None,
+        }
+    }
+
+    /// Create a new TracedDbPools with primary and replica pools.
+    ///
+    /// Read operations will route to the replica pool for load distribution,
+    /// while write operations always use the primary pool.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # #[cfg(feature = "sqlx-tracing")]
+    /// # async fn example() -> Result<(), sqlx::Error> {
+    /// use sqlx::postgres::PgPoolOptions;
+    /// use sqlx_pool_router::TracedDbPools;
+    ///
+    /// let primary = PgPoolOptions::new()
+    ///     .max_connections(5)
+    ///     .connect("postgresql://primary/db")
+    ///     .await?;
+    /// let primary_traced = sqlx_tracing::Pool::from(primary);
+    ///
+    /// let replica = PgPoolOptions::new()
+    ///     .max_connections(10)
+    ///     .connect("postgresql://replica/db")
+    ///     .await?;
+    /// let replica_traced = sqlx_tracing::Pool::from(replica);
+    ///
+    /// let pools = TracedDbPools::with_replica(primary_traced, replica_traced);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_replica(
+        primary: sqlx_tracing::Pool<sqlx::Postgres>,
+        replica: sqlx_tracing::Pool<sqlx::Postgres>,
+    ) -> Self {
+        Self {
+            primary: Arc::new(primary),
+            replica: Some(Arc::new(replica)),
+        }
+    }
+
+    /// Check if a replica pool is configured.
+    ///
+    /// Returns `true` if a replica pool was provided via [`with_replica`](Self::with_replica).
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # #[cfg(feature = "sqlx-tracing")]
+    /// # async fn example() -> Result<(), sqlx::Error> {
+    /// use sqlx::PgPool;
+    /// use sqlx_pool_router::TracedDbPools;
+    ///
+    /// let pool = PgPool::connect("postgresql://localhost/db").await?;
+    /// let traced_pool = sqlx_tracing::Pool::from(pool);
+    /// let pools = TracedDbPools::new(traced_pool);
+    /// assert!(!pools.has_replica());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn has_replica(&self) -> bool {
+        self.replica.is_some()
+    }
+}
+
+#[cfg(feature = "sqlx-tracing")]
+impl PoolProvider for TracedDbPools {
+    type Pool = sqlx_tracing::Pool<sqlx::Postgres>;
+
+    fn read(&self) -> &Self::Pool {
+        self.replica
+            .as_ref()
+            .map(|r| r.as_ref())
+            .unwrap_or(self.primary.as_ref())
+    }
+
+    fn write(&self) -> &Self::Pool {
+        self.primary.as_ref()
     }
 }
 
@@ -791,5 +1037,165 @@ mod tests {
         // - test_testdbpools_read_pool_rejects_writes (proves read pool rejects writes)
         // - test_testdbpools_read_pool_allows_selects (proves read pool allows reads)
         // - Integration tests in examples/testing.rs
+    }
+
+    #[cfg(feature = "sqlx-tracing")]
+    #[sqlx::test]
+    async fn test_traceddbpools_without_replica(pool: PgPool) {
+        let traced_pool = sqlx_tracing::Pool::from(pool);
+        let db_pools = TracedDbPools::new(traced_pool);
+
+        // Without replica, has_replica() should return false
+        assert!(!db_pools.has_replica());
+
+        // Both read and write should work (they point to the same pool)
+        let read_result: (i32,) = sqlx::query_as("SELECT 1")
+            .fetch_one(db_pools.read())
+            .await
+            .unwrap();
+        assert_eq!(read_result.0, 1);
+
+        let write_result: (i32,) = sqlx::query_as("SELECT 2")
+            .fetch_one(db_pools.write())
+            .await
+            .unwrap();
+        assert_eq!(write_result.0, 2);
+
+        // Verify read() and write() return the same underlying pool
+        assert!(
+            std::ptr::eq(db_pools.read(), db_pools.write()),
+            "read() and write() should return same pool when no replica"
+        );
+    }
+
+    #[cfg(feature = "sqlx-tracing")]
+    #[sqlx::test]
+    async fn test_traceddbpools_with_replica_routes_correctly(_pool: PgPool) {
+        // Create admin connection to postgres database
+        let admin_url = build_test_url("postgres");
+        let admin_pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&admin_url)
+            .await
+            .unwrap();
+
+        // Create two separate databases to simulate primary and replica
+        let (primary_pool, primary_name) = create_test_db(&admin_pool, "traced_primary").await;
+        let (replica_pool, replica_name) = create_test_db(&admin_pool, "traced_replica").await;
+
+        // Wrap in traced pools
+        let primary_traced = sqlx_tracing::Pool::from(primary_pool.clone());
+        let replica_traced = sqlx_tracing::Pool::from(replica_pool.clone());
+
+        let db_pools = TracedDbPools::with_replica(primary_traced, replica_traced);
+        assert!(db_pools.has_replica());
+
+        // read() should return replica
+        let read_marker: (String,) = sqlx::query_as("SELECT name FROM db_marker")
+            .fetch_one(db_pools.read())
+            .await
+            .unwrap();
+        assert_eq!(
+            read_marker.0, replica_name,
+            "read() should route to replica"
+        );
+
+        // write() should return primary
+        let write_marker: (String,) = sqlx::query_as("SELECT name FROM db_marker")
+            .fetch_one(db_pools.write())
+            .await
+            .unwrap();
+        assert_eq!(
+            write_marker.0, primary_name,
+            "write() should route to primary"
+        );
+
+        // Verify read() and write() return different pools
+        assert!(
+            !std::ptr::eq(db_pools.read(), db_pools.write()),
+            "read() and write() should return different pools when replica exists"
+        );
+
+        // Cleanup
+        primary_pool.close().await;
+        replica_pool.close().await;
+        drop_test_db(&admin_pool, &primary_name).await;
+        drop_test_db(&admin_pool, &replica_name).await;
+    }
+
+    #[cfg(feature = "sqlx-tracing")]
+    #[sqlx::test]
+    async fn test_traceddbpools_implements_pool_provider(pool: PgPool) {
+        let traced_pool = sqlx_tracing::Pool::from(pool);
+        let db_pools = TracedDbPools::new(traced_pool);
+
+        // Should be cloneable (required by PoolProvider trait)
+        let cloned = db_pools.clone();
+
+        // Cloned instance should work the same way
+        let result: (i32,) = sqlx::query_as("SELECT 42")
+            .fetch_one(cloned.read())
+            .await
+            .unwrap();
+        assert_eq!(result.0, 42);
+    }
+
+    #[cfg(feature = "sqlx-tracing")]
+    #[sqlx::test]
+    async fn test_traceddbpools_arc_wrapper_doesnt_break_routing(_pool: PgPool) {
+        // This test ensures the Arc wrapper doesn't interfere with pointer comparison
+        // or routing logic
+
+        let admin_url = build_test_url("postgres");
+        let admin_pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&admin_url)
+            .await
+            .unwrap();
+
+        let (primary_pool, primary_name) = create_test_db(&admin_pool, "arc_primary").await;
+        let (replica_pool, replica_name) = create_test_db(&admin_pool, "arc_replica").await;
+
+        let primary_traced = sqlx_tracing::Pool::from(primary_pool.clone());
+        let replica_traced = sqlx_tracing::Pool::from(replica_pool.clone());
+
+        let db_pools = TracedDbPools::with_replica(primary_traced, replica_traced);
+
+        // Clone the pools - this clones the Arc, not the underlying Pool
+        let cloned_pools = db_pools.clone();
+
+        // Both instances should route to the same underlying databases
+        let original_read: (String,) = sqlx::query_as("SELECT name FROM db_marker")
+            .fetch_one(db_pools.read())
+            .await
+            .unwrap();
+
+        let cloned_read: (String,) = sqlx::query_as("SELECT name FROM db_marker")
+            .fetch_one(cloned_pools.read())
+            .await
+            .unwrap();
+
+        assert_eq!(original_read.0, replica_name);
+        assert_eq!(cloned_read.0, replica_name);
+
+        // Same for write
+        let original_write: (String,) = sqlx::query_as("SELECT name FROM db_marker")
+            .fetch_one(db_pools.write())
+            .await
+            .unwrap();
+
+        let cloned_write: (String,) = sqlx::query_as("SELECT name FROM db_marker")
+            .fetch_one(cloned_pools.write())
+            .await
+            .unwrap();
+
+        assert_eq!(original_write.0, primary_name);
+        assert_eq!(cloned_write.0, primary_name);
+
+        // Cleanup
+        primary_pool.close().await;
+        replica_pool.close().await;
+        drop_test_db(&admin_pool, &primary_name).await;
+        drop_test_db(&admin_pool, &replica_name).await;
     }
 }
