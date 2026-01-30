@@ -220,7 +220,7 @@ pub trait PoolProvider: Clone + Send + Sync + 'static {
     ///     // Your methods that use sqlx queries
     /// }
     /// ```
-    type Pool: Send + Sync;
+    type Pool: Clone + Send + Sync + 'static;
 
     /// Get a pool for read operations.
     ///
